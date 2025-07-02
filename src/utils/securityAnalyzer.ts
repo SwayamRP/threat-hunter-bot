@@ -121,7 +121,15 @@ export class SecurityAnalyzer {
     const originalFetch = window.fetch;
     window.fetch = async (...args) => {
       const [resource] = args;
-      const url = typeof resource === 'string' ? resource : resource.url;
+      let url: string;
+      
+      if (typeof resource === 'string') {
+        url = resource;
+      } else if (resource instanceof Request) {
+        url = resource.url;
+      } else {
+        url = resource.toString();
+      }
       
       this.analyzeURL(url);
       
