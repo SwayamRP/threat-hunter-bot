@@ -1,6 +1,5 @@
-
 import { useState, useRef, useEffect } from "react";
-import { MessageCircle, X, Send, Shield, AlertTriangle } from "lucide-react";
+import { MessageCircle, X, Send, Shield, AlertTriangle, Settings, Key } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,6 +7,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { SecurityAnalyzer } from "@/utils/securityAnalyzer";
+import { OpenAIService } from "@/utils/openaiService";
+import { ApiKeyModal } from "@/components/ApiKeyModal";
 
 interface Message {
   id: string;
@@ -22,7 +23,7 @@ export const CyberSecurityChatbot = () => {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "1",
-      text: "Hello! I'm CyberGuard AI, your cybersecurity assistant. I'm actively monitoring this website for threats and can help you with security concerns. How can I assist you today?",
+      text: "Hello! I'm CyberGuard AI, powered by GPT-4o for advanced cybersecurity assistance. I'm actively monitoring this website for threats and can help you with security concerns. How can I assist you today?",
       sender: "ai",
       type: "normal",
       timestamp: new Date(),
@@ -30,6 +31,8 @@ export const CyberSecurityChatbot = () => {
   ]);
   const [inputMessage, setInputMessage] = useState("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
+  const [openaiService] = useState(new OpenAIService());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
@@ -42,7 +45,6 @@ export const CyberSecurityChatbot = () => {
   }, [messages]);
 
   useEffect(() => {
-    // Start continuous threat monitoring
     const analyzer = new SecurityAnalyzer();
     analyzer.startMonitoring((threat) => {
       const threatMessage: Message = {
@@ -67,6 +69,12 @@ export const CyberSecurityChatbot = () => {
   const handleSendMessage = async () => {
     if (!inputMessage.trim()) return;
 
+    // Check if OpenAI API key is set
+    if (!openaiService.hasApiKey()) {
+      setShowApiKeyModal(true);
+      return;
+    }
+
     const userMessage: Message = {
       id: Date.now().toString(),
       text: inputMessage,
@@ -75,12 +83,28 @@ export const CyberSecurityChatbot = () => {
     };
 
     setMessages(prev => [...prev, userMessage]);
+    const currentInput = inputMessage;
     setInputMessage("");
     setIsAnalyzing(true);
 
-    // Simulate AI analysis
-    setTimeout(() => {
-      const aiResponse = generateAIResponse(inputMessage);
+    try {
+      // Prepare conversation context for OpenAI
+      const conversationMessages = messages
+        .filter(msg => msg.type !== "threat") // Exclude threat notifications from conversation
+        .slice(-10) // Keep last 10 messages for context
+        .map(msg => ({
+          role: msg.sender === "user" ? "user" as const : "assistant" as const,
+          content: msg.text
+        }));
+
+      // Add the current user message
+      conversationMessages.push({
+        role: "user" as const,
+        content: currentInput
+      });
+
+      const aiResponse = await openaiService.generateResponse(conversationMessages);
+      
       const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
         text: aiResponse,
@@ -88,31 +112,58 @@ export const CyberSecurityChatbot = () => {
         type: "analysis",
         timestamp: new Date(),
       };
+      
       setMessages(prev => [...prev, aiMessage]);
+    } catch (error) {
+      console.error('Error generating AI response:', error);
+      
+      let errorMessage = "I apologize, but I encountered an error processing your request. ";
+      
+      if (error instanceof Error) {
+        if (error.message.includes('Invalid API key')) {
+          errorMessage += "Please check your OpenAI API key and try again.";
+          setShowApiKeyModal(true);
+        } else if (error.message.includes('rate limit')) {
+          errorMessage += "API rate limit exceeded. Please try again in a few minutes.";
+        } else {
+          errorMessage += "Please try again later.";
+        }
+      }
+      
+      const errorAiMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        text: errorMessage,
+        sender: "ai",
+        type: "normal",
+        timestamp: new Date(),
+      };
+      
+      setMessages(prev => [...prev, errorAiMessage]);
+      
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to generate response",
+        variant: "destructive",
+      });
+    } finally {
       setIsAnalyzing(false);
-    }, 1500);
+    }
   };
 
-  const generateAIResponse = (userInput: string): string => {
-    const input = userInput.toLowerCase();
-    
-    if (input.includes("malware") || input.includes("virus")) {
-      return "I've initiated a malware scan. Current status: No active malware detected. I recommend regular system updates and avoiding suspicious downloads. Would you like me to analyze a specific file or URL?";
-    }
-    
-    if (input.includes("phishing") || input.includes("email")) {
-      return "Phishing protection is active. I'm monitoring for suspicious links and emails. Key signs of phishing: unexpected urgent requests, suspicious sender addresses, and requests for sensitive information. Always verify sender identity before clicking links.";
-    }
-    
-    if (input.includes("security") || input.includes("protect")) {
-      return "Current security status: PROTECTED. Active monitoring includes: Real-time threat detection, suspicious activity analysis, and automated threat response. Your website is being continuously monitored for vulnerabilities.";
-    }
-    
-    if (input.includes("analyze") || input.includes("check")) {
-      return "I can analyze URLs, files, network traffic, and user behavior patterns for security threats. Please provide the specific item you'd like me to analyze, and I'll perform a comprehensive security assessment.";
-    }
-    
-    return "I'm here to help with cybersecurity concerns. I can detect malware, identify phishing attempts, analyze suspicious activities, and provide security recommendations. What specific security issue would you like me to address?";
+  const handleApiKeySet = (apiKey: string) => {
+    openaiService.setApiKey(apiKey);
+    toast({
+      title: "API Key Set",
+      description: "GPT-4o integration is now active!",
+    });
+  };
+
+  const handleClearApiKey = () => {
+    openaiService.clearApiKey();
+    toast({
+      title: "API Key Cleared",
+      description: "GPT-4o integration disabled",
+    });
   };
 
   const getMessageIcon = (type?: string) => {
@@ -146,18 +197,29 @@ export const CyberSecurityChatbot = () => {
               <CardTitle className="flex items-center gap-2">
                 <Shield className="h-5 w-5" />
                 CyberGuard AI
-                <Badge variant="secondary" className="bg-green-500 text-white">
-                  Online
+                <Badge variant="secondary" className={openaiService.hasApiKey() ? "bg-green-500 text-white" : "bg-yellow-500 text-white"}>
+                  {openaiService.hasApiKey() ? "GPT-4o" : "Basic"}
                 </Badge>
               </CardTitle>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setIsOpen(false)}
-                className="text-white hover:bg-white/20"
-              >
-                <X className="h-4 w-4" />
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowApiKeyModal(true)}
+                  className="text-white hover:bg-white/20"
+                  title="Configure OpenAI API"
+                >
+                  <Settings className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setIsOpen(false)}
+                  className="text-white hover:bg-white/20"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
           </CardHeader>
 
@@ -181,7 +243,7 @@ export const CyberSecurityChatbot = () => {
                   >
                     <div className="flex items-start gap-2">
                       {getMessageIcon(message.type)}
-                      <span className="text-sm">{message.text}</span>
+                      <span className="text-sm whitespace-pre-wrap">{message.text}</span>
                     </div>
                     <div className="text-xs opacity-70 mt-1">
                       {message.timestamp.toLocaleTimeString()}
@@ -194,7 +256,7 @@ export const CyberSecurityChatbot = () => {
                   <div className="inline-block p-3 rounded-lg bg-slate-800 text-gray-100">
                     <div className="flex items-center gap-2">
                       <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-cyan-400"></div>
-                      Analyzing security data...
+                      {openaiService.hasApiKey() ? "GPT-4o is thinking..." : "Analyzing security data..."}
                     </div>
                   </div>
                 </div>
@@ -203,6 +265,12 @@ export const CyberSecurityChatbot = () => {
             </ScrollArea>
 
             <div className="p-4 border-t border-slate-700">
+              {!openaiService.hasApiKey() && (
+                <div className="mb-2 p-2 bg-amber-900/20 border border-amber-600 rounded text-xs text-amber-200 flex items-center gap-2">
+                  <Key className="h-3 w-3" />
+                  <span>Set OpenAI API key for GPT-4o responses</span>
+                </div>
+              )}
               <div className="flex gap-2">
                 <Input
                   value={inputMessage}
@@ -223,6 +291,13 @@ export const CyberSecurityChatbot = () => {
           </CardContent>
         </Card>
       )}
+
+      {/* API Key Modal */}
+      <ApiKeyModal
+        isOpen={showApiKeyModal}
+        onClose={() => setShowApiKeyModal(false)}
+        onApiKeySet={handleApiKeySet}
+      />
     </>
   );
 };
