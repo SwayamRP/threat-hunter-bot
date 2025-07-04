@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { MessageCircle, X, Send, Shield, AlertTriangle, Settings, Key } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
@@ -34,6 +34,7 @@ export const CyberSecurityChatbot = () => {
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [openaiService] = useState(new OpenAIService());
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { toast } = useToast();
 
   const scrollToBottom = () => {
@@ -65,6 +66,14 @@ export const CyberSecurityChatbot = () => {
 
     return () => analyzer.stopMonitoring();
   }, [toast]);
+
+  // Auto-resize textarea
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`;
+    }
+  }, [inputMessage]);
 
   const handleSendMessage = async () => {
     if (!inputMessage.trim()) return;
@@ -147,6 +156,13 @@ export const CyberSecurityChatbot = () => {
       });
     } finally {
       setIsAnalyzing(false);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage();
     }
   };
 
@@ -271,21 +287,26 @@ export const CyberSecurityChatbot = () => {
                   <span>Set OpenAI API key for GPT-4o responses</span>
                 </div>
               )}
-              <div className="flex gap-2">
-                <Input
+              <div className="relative">
+                <Textarea
+                  ref={textareaRef}
                   value={inputMessage}
                   onChange={(e) => setInputMessage(e.target.value)}
-                  placeholder="Ask about security threats..."
-                  onKeyPress={(e) => e.key === "Enter" && handleSendMessage()}
-                  className="bg-slate-800 border-slate-600 text-white placeholder-gray-400"
+                  onKeyDown={handleKeyDown}
+                  placeholder="Message CyberGuard AI..."
+                  className="bg-slate-800 border-slate-600 text-white placeholder-gray-400 resize-none pr-12 min-h-[44px] max-h-[120px]"
+                  rows={1}
                 />
                 <Button
                   onClick={handleSendMessage}
-                  disabled={isAnalyzing}
-                  className="bg-cyan-600 hover:bg-cyan-700"
+                  disabled={isAnalyzing || !inputMessage.trim()}
+                  className="absolute bottom-2 right-2 h-8 w-8 p-0 bg-cyan-600 hover:bg-cyan-700 disabled:bg-slate-600"
                 >
                   <Send className="h-4 w-4" />
                 </Button>
+              </div>
+              <div className="text-xs text-gray-400 mt-1">
+                Press Enter to send, Shift+Enter for new line
               </div>
             </div>
           </CardContent>
